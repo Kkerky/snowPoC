@@ -149,7 +149,7 @@ SOURCES = [
         "id": "AZ9",
         "title": "Create and manage Windows VMs with multiple NICs",
         "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/windows/multiple-nics",
-        "use": "多 NIC VM 限制与操作参考",
+        "use": "多 NIC 只能挂到同一 VNet 内多个 subnet",
     },
     {
         "id": "AZ10",
@@ -162,6 +162,12 @@ SOURCES = [
         "title": "Assign Azure roles using the Azure portal",
         "url": "https://learn.microsoft.com/en-us/azure/role-based-access-control/role-assignments-portal",
         "use": "给 Service Principal 分配 Reader 角色",
+    },
+    {
+        "id": "AZ12",
+        "title": "Azure Virtual Network FAQ",
+        "url": "https://learn.microsoft.com/en-us/azure/virtual-network/virtual-networks-faq",
+        "use": "VNet peering 不支持 transitive peering；vnet02 与 vnet03 需要直接 peering",
     },
 ]
 
@@ -185,8 +191,7 @@ RESOURCE_PLAN = [
     ["网络", "Virtual Network", "vnet03-client-acc", "1", "192.168.0.0/24", "Client & ACC Zone"],
     ["网络", "Subnet", "subnet-server", "1", "10.0.0.0/25", "vnet01 workload subnet。图中 .1/.2/.3 仅作概念。"],
     ["网络", "Subnet", "AzureBastionSubnet", "1", "10.0.0.128/26", "Bastion 专用；必须使用此名称。"],
-    ["网络", "Subnet", "subnet-mid", "1", "172.16.0.0/25", "Linux MID / Ubuntu / multi-NIC NIC1。"],
-    ["网络", "Subnet", "subnet-multinic-2", "1", "172.16.0.128/26", "为 Azure 多 NIC 限制补充；同一 VM 的 NIC 不能跨 VNet。"],
+    ["网络", "Subnet", "subnet-mid", "1", "172.16.0.0/25", "Linux MID / Ubuntu 22 / VNet02 访问测试 VM。"],
     ["网络", "Subnet", "subnet-client", "1", "192.168.0.0/24", "Windows 11 / ACC client zone。"],
     ["网络", "Network Security Group", "nsg-vnet01-server", "1", "关联 subnet-server", "只允许 MID 私有 IP 到目标端口。"],
     ["网络", "Network Security Group", "nsg-vnet02-mid", "1", "关联 subnet-mid", "允许管理入口、出站 HTTPS、Discovery 流量。"],
@@ -202,9 +207,8 @@ RESOURCE_PLAN = [
     ["Compute", "Windows Server 2019 VM", "vm-win2019-01", "1", "B2ms", "Windows Discovery / IIS service mapping target。"],
     ["Compute", "Windows Server 2022 VM", "vm-win2022-01", "1", "B2ms", "Windows Discovery target。"],
     ["Compute", "Windows 11 VM", "vm-win11-acc-01", "1", "B2ms", "ACC Windows target；注意 Windows client license/image 可用性。"],
-    ["Compute", "Ubuntu 22 VM", "vm-ubuntu-01", "1", "B2ms", "Linux Discovery / Nginx target。"],
+    ["Compute", "Ubuntu 22 VM", "vm-ubuntu-01", "1", "B2ms", "Linux Discovery / Nginx target；同时用于验证 vnet02↔vnet03 连通性。"],
     ["Compute", "RHEL 9 VM", "vm-rhel9-01", "1", "B2ms", "Linux Discovery target。"],
-    ["Compute", "Ubuntu Multi-NIC VM", "vm-ubuntu-mnic-01", "1", "B2s / 2 NIC", "NIC1 subnet-mid，NIC2 subnet-multinic-2；不跨 VNet。"],
     ["Network Device", "Palo Alto VM-Series", "vm-pa-01", "1", "Marketplace / PAYG", "Discovery対象のみ；启用管理接口/SNMP。"],
     ["Network Device", "FortiGate VM", "vm-fgt-01", "1", "Marketplace / PAYG 1 vCPU 推奨", "Discovery対象のみ；启用管理接口/SNMP。"],
 ]
@@ -219,9 +223,7 @@ IP_PLAN = [
     ["Server & Network Device", "vnet01", "subnet-server", "10.0.0.0/25", "vm-pa-01", "10.0.0.40", "Palo Alto management"],
     ["Server & Network Device", "vnet01", "subnet-server", "10.0.0.0/25", "vm-fgt-01", "10.0.0.41", "FortiGate management"],
     ["MID & Linux", "vnet02", "subnet-mid", "172.16.0.0/25", "vm-linux-mid-01", "172.16.0.10", "Linux MID"],
-    ["MID & Linux", "vnet02", "subnet-mid", "172.16.0.0/25", "vm-ubuntu-01", "172.16.0.20", "Ubuntu 22"],
-    ["MID & Linux", "vnet02", "subnet-mid", "172.16.0.0/25", "vm-ubuntu-mnic-01 NIC1", "172.16.0.30", "multi-NIC NIC1"],
-    ["MID & Linux", "vnet02", "subnet-multinic-2", "172.16.0.128/26", "vm-ubuntu-mnic-01 NIC2", "172.16.0.132", "multi-NIC NIC2，Azure 实作修正"],
+    ["MID & Linux", "vnet02", "subnet-mid", "172.16.0.0/25", "vm-ubuntu-01", "172.16.0.20", "Ubuntu 22 / vnet02→vnet03 连通性测试"],
     ["Client & ACC", "vnet03", "subnet-client", "192.168.0.0/24", "vm-win11-acc-01", "192.168.0.10", "Windows 11 + ACC"],
 ]
 
@@ -234,6 +236,7 @@ NSG_RULES = [
     ["nsg-vnet01-server", "Inbound", "130", "Allow-Linux-SSH", "10.0.0.10,172.16.0.10", "Linux targets", "TCP 22", "Allow", "Linux/RHEL SSH。"],
     ["nsg-vnet02-mid", "Outbound", "100", "Allow-MID-HTTPS-Out", "MID VMs", "Internet", "TCP 443", "Allow", "MID 到 ServiceNow instance / Azure API。"],
     ["nsg-vnet02-mid", "Inbound", "100", "Allow-VNet-Peering", "VirtualNetwork", "VirtualNetwork", "Any", "Allow", "Peering 内部互通。"],
+    ["nsg-vnet03-client", "Inbound", "100", "Allow-Ubuntu-VNet02-Access", "172.16.0.0/24", "vm-win11-acc-01", "TCP 5985", "Allow", "用于验证 Ubuntu 从 vnet02 访问 vnet03 的私网连通性。"],
     ["nsg-vnet03-client", "Outbound", "100", "Allow-ACC-HTTPS-Out", "vm-win11-acc-01", "Internet", "TCP 443", "Allow", "ACC Agent / Windows Update / ServiceNow 通信。"],
     ["全部", "Inbound", "4096", "Deny-Internet-Direct", "Internet", "Any", "Any", "Deny", "不建议给 VM 公网 RDP/SSH；用 Bastion。"],
 ]
@@ -244,7 +247,7 @@ BUILD_STEPS = [
     ["0-2", "决定区域和命名", "默认使用 Japan East；如客户指定区域则统一替换。资源名前缀使用 snow-poc。", "所有资源写入资源清单。"],
     ["1-1", "创建 Resource Group", "Azure Portal > Resource groups > Create：RG-SNOW-Discovery-POC。", "RG 创建成功。"],
     ["1-2", "创建 vnet01", "Virtual networks > Create：10.0.0.0/24；添加 subnet-server 10.0.0.0/25 和 AzureBastionSubnet 10.0.0.128/26。", "两个 subnet 存在；AzureBastionSubnet 名称精确。"],
-    ["1-3", "创建 vnet02", "Virtual networks > Create：172.16.0.0/24；subnet-mid 172.16.0.0/25；subnet-multinic-2 172.16.0.128/26。", "为 multi-NIC 修正准备第二 subnet。"],
+    ["1-3", "创建 vnet02", "Virtual networks > Create：172.16.0.0/24；subnet-mid 172.16.0.0/25。Ubuntu 与 Linux MID 都放在这里。", "vnet02 只有一个工作 subnet；不要再创建跨 VNet 的第二 NIC subnet。"],
     ["1-4", "创建 vnet03", "Virtual networks > Create：192.168.0.0/24；subnet-client 192.168.0.0/24。", "Client/ACC subnet 存在。"],
     ["1-5", "创建 NSG 并关联 subnet", "创建 nsg-vnet01-server/nsg-vnet02-mid/nsg-vnet03-client，按 NSG_Rules 添加初期规则。", "NSG 关联到对应 subnet。"],
     ["1-6", "创建 NAT Gateway", "按图创建 natgw-vnet01、natgw-vnet02 并关联 subnet-server/subnet-mid；若 vnet03 无公网 IP 且需 ACC/更新，追加 natgw-vnet03。", "VM 不带公网 IP 也可出站访问 Internet。"],
@@ -252,10 +255,10 @@ BUILD_STEPS = [
     ["1-8", "创建 Azure Bastion", "Bastion > Create：放在 vnet01；选择 AzureBastionSubnet；创建 Public IP。", "可从 Portal 用 Bastion 登录 vnet01/vnet02/vnet03 VM。"],
     ["2-1", "创建 Windows MID VM", "Windows Server 2022 / D2s_v5 / subnet-server / 私有 IP 10.0.0.10 / 不开放公网 RDP。", "Bastion 能登录；出站 443 可访问 ServiceNow。"],
     ["2-2", "创建 Linux MID VM", "Ubuntu 22.04 / B2s / subnet-mid / 私有 IP 172.16.0.10 / SSH Key。", "Bastion/Serial/SSH 可登录；出站 443 正常。"],
-    ["2-3", "创建 Discovery targets", "创建 Windows 2019/2022、RHEL9、Ubuntu22、Windows11、Ubuntu multi-NIC。Windows11 如 Marketplace license 不满足，先用 Windows Server 作为 ACC替代验证并记录偏差。", "所有 VM Running；私有 IP 符合 IP_Plan。"],
-    ["2-4", "创建 Ubuntu multi-NIC", "注意 Azure 不支持一个 VM 的 NIC 跨 VNet。按本手册将 NIC1/NIC2 放在 vnet02 的两个 subnet。创建或停机后追加第二 NIC。", "VM 内能看到两块网卡；ServiceNow 能发现 NIC 信息。"],
+    ["2-3", "创建 Discovery targets", "创建 Windows 2019/2022、RHEL9、Ubuntu22、Windows11。Windows11 如 Marketplace license 不满足，先用 Windows Server 作为 ACC 替代验证并记录偏差。", "所有 VM Running；私有 IP 符合 IP_Plan。"],
+    ["2-4", "验证 Ubuntu 同时访问 VNet02 / VNet03", "Ubuntu 22 保持单 NIC 放在 vnet02/subnet-mid；确认通过 vnet02↔vnet03 peering 能访问 vnet03 的验证目标（建议 vm-win11-acc-01 的 5985 端口或你实际开放的测试端口）。", "Ubuntu 只看到一块网卡，但能通过私有 IP 访问 vnet03 目标。"],
     ["2-5", "部署 Palo Alto / FortiGate", "从 Azure Marketplace 部署 PAYG。目标只是被 Discovery 发现，优先启用管理接口、SNMP read-only、HTTPS/SSH 管理。", "从 MID 私有 IP 可 ping/SSH/HTTPS/SNMP 到设备管理 IP。"],
-    ["2-6", "OS 基础配置", "Windows 开启远程管理/WMI/防火墙例外；Linux 开启 SSH；测试 Nmap/credential-less 所需端口；安装 IIS/Nginx 作为 Service Mapping entry point。", "MID 到各目标端口连通。"],
+    ["2-6", "OS 基础配置", "Windows 开启远程管理/WMI/防火墙例外；Linux 开启 SSH；在 vnet03 的验证目标上开放 5985 或另一个测试端口；测试 Nmap/credential-less 所需端口；安装 IIS/Nginx 作为 Service Mapping entry point。", "MID 到各目标端口连通；Ubuntu 可到达 vnet03 验证端口。"],
     ["3-1", "安装 Windows MID Server", "ServiceNow instance 中下载 MID Server 安装包，在 vm-win-mid-01 安装，使用专用 MID 用户，启动服务并在 ServiceNow 中 Validate。", "MID 状态 Up / Validated。"],
     ["3-2", "安装 Linux MID Server", "在 vm-linux-mid-01 下载 Linux MID 包，配置 wrapper/服务，启动并 Validate。", "Linux MID 状态 Up / Validated。"],
     ["3-3", "创建 Credentials", "ServiceNow 中创建 Windows、SSH、SNMP、Azure Service Principal、ACC 相关凭据。不要把密码写入手册或 Excel。", "Credentials 测试通过或在 Discovery Log 中能看到成功使用。"],
@@ -263,7 +266,7 @@ BUILD_STEPS = [
     ["3-5", "配置 Azure Cloud Discovery", "Azure Entra ID 创建 App registration/client secret；订阅上给 Reader 权限；ServiceNow 创建 Azure Credential/Cloud account/schedule。", "能发现 Azure VM/VNet/Subnet/NIC/Disk 等云资源。"],
     ["3-6", "配置 Service Mapping", "准备 IIS/Nginx 入口点；创建 Application Service/Entry Point；运行 Top-down Discovery。", "Application Service 中出现入口点、主机和依赖关系。"],
     ["3-7", "配置 ACC", "在 Windows11 和 Linux 目标安装 ACC Agent，使用 registration key/installer；关联 Check Policy。", "ACC Agent Online；Host Data/Checks 有结果。"],
-    ["4-1", "验证与截图", "按 Verification_Matrix 逐项截图：Azure资源、MID状态、Discovery Status、CI、Cloud资源、Service Mapping、ACC结果。", "证据包完整。"],
+    ["4-1", "验证与截图", "按 Verification_Matrix 逐项截图：Azure资源、MID状态、Discovery Status、CI、Cloud资源、Service Mapping、ACC结果，以及 Ubuntu→VNet03 连通性。", "证据包完整。"],
     ["5-1", "成本控制/清理", "PoC 每日结束停止 VM；结束后删除 RG 或按资源清单逐项清理 Marketplace/NAT/Bastion/Public IP。", "无遗留计费资源。"],
 ]
 
@@ -293,12 +296,14 @@ VERIFICATION_MATRIX = [
     ["V-08", "Service Mapping / Cloud + Entry Point", "Azure-hosted app", "Cloud Discovery + app入口", "用 Azure VM 上的 Web 入口运行 top-down。", "云资源与应用服务能建立可解释关系。", "Service Map + Cloud CI", ""],
     ["V-09", "ACC / Agent Based", "Windows 11", "ACC Agent安装/注册", "安装 ACC Agent，执行 Check Policy。", "Agent Online，Host Data/Check Result 可见。", "ACC页面截图", ""],
     ["V-10", "ACC / Agent Based", "Linux", "ACC Agent安装/注册", "安装 ACC Agent，执行 Check Policy。", "Agent Online，Host Data/Check Result 可见。", "ACC页面截图", ""],
+    ["V-11", "Network / Peering", "Ubuntu on vnet02 -> vnet03 target", "vnet02↔vnet03 peering Connected；vnet03 NSG 放通测试端口", "从 Ubuntu 运行 ssh/curl/Test-NetConnection 到 vnet03 私有 IP。", "Ubuntu 仅单 NIC，但能通过私网到达 vnet03 目标。", "Connectivity test log / screenshot", ""],
 ]
 
 
 RISKS = [
     ["主题", "风险/限制", "处理建议"],
-    ["Multi-NIC", "图中 Ubuntu Multi-NIC NIC1 在 vnet02、NIC2 在 vnet03；Azure VM 的 NIC 不能跨 VNet。", "本手册将两块 NIC 放在 vnet02 的两个 subnet；若必须跨网络边界，请改成两台 VM 或调整为同一 VNet 多 subnet。"],
+    ["Multi-NIC", "Azure VM 的 NIC 不能跨 VNet；如果 Ubuntu 要同时访问 VNet02 和 VNet03，不能用跨 VNet Multi-NIC。", "Ubuntu 保持单 NIC 放在 vnet02；通过 vnet02↔vnet03 直接 peering 访问 vnet03。"],
+    ["Peering", "VNet peering 不是传递式。vnet02 不能靠 vnet01 间接到 vnet03。", "必须直接建立 vnet02↔vnet03 peering，并在 vnet03 NSG 放通 Ubuntu 的测试端口。"],
     ["Azure 私有 IP", "Azure 每个 subnet 保留前几个和最后一个 IP，图中 10.0.0.1/10.0.0.2/10.0.0.3 不建议/不可作为 VM IP。", "实际固定 IP 从 .10/.20 等开始分配。"],
     ["Bastion", "Azure Bastion 需要名为 AzureBastionSubnet 的专用 subnet，且大小通常要求 /26 或更大。", "vnet01 预留 10.0.0.128/26。"],
     ["Windows 11", "Azure Windows client VM 可能受 license / image 可用性约束。", "优先确认订阅/租户资格；若不可用，记录偏差并用 Windows Server 先验证 ACC 流程。"],
@@ -318,7 +323,7 @@ TROUBLESHOOTING = [
     ["Cloud Discovery 无结果", "Tenant ID、Subscription ID、Client ID/Secret、Reader role、secret 过期", "Azure Portal 重新确认 role assignment；ServiceNow 重新测试 credential。"],
     ["Service Map 为空", "Entry point 可达性、应用服务是否真实监听、目标主机是否已被 Discovery", "从 MID curl 入口；先成功发现 OS CI，再跑 top-down。"],
     ["Bastion 无法创建", "AzureBastionSubnet 名称/大小、Public IP SKU、区域可用性", "确认 subnet 名称完全一致且 /26 以上。"],
-    ["VNet 间不通", "Peering 双向状态、NSG、路由表、地址空间重叠", "检查三对 peering 都是 Connected；使用 Network Watcher 测试。"],
+    ["VNet 间不通", "Peering 双向状态、NSG、路由表、地址空间重叠、是否直接 peering", "检查 vnet02↔vnet03 都是 Connected；不要依赖 transitive peering；使用 Network Watcher 测试。"],
 ]
 
 
@@ -425,6 +430,7 @@ def create_word() -> None:
     add_bullets(doc, [
         "PoC 的核心不是单纯创建 VM，而是构造一组可被 ServiceNow 从不同机制发现的 Azure 目标：IP Range Discovery、Credentialed Discovery、Azure Cloud Discovery、Service Mapping、ACC。",
         "Azure 网络采用 3 个 VNet：vnet01=Server & Network Device Zone，vnet02=MID & Linux Discovery Zone，vnet03=Client & ACC Zone；三者 Full Mesh Peering。",
+        "Ubuntu 不再做跨 VNet Multi-NIC，而是单 NIC 放在 vnet02；通过 vnet02↔vnet03 直接 peering 验证它能同时访问两个 VNet。",
         "两个 MID Server：Windows MID 放在 vnet01，Linux MID 放在 vnet02。这样能分别验证 Windows/Linux MID 在不同网络区的可达性和选择策略。",
         "Palo Alto / FortiGate 作为 Discovery 対象のみ（只作为被发现对象），不承担真实流量转发；重点启用管理接口与 SNMP。",
         "按图中范围，AWS / Others Cloud / NW(Others) / traffic-based Mapping 不做。",
@@ -456,7 +462,7 @@ def create_word() -> None:
         "vnet02 172.16.0.0/24  MID & Linux Discovery Zone\n"
         "  ├─ Linux MID\n"
         "  ├─ Ubuntu 22\n"
-        "  └─ Ubuntu Multi-NIC（同一 VNet 内 2 subnet）\n\n"
+        "  └─ Ubuntu 22（单 NIC；通过 vnet02↔vnet03 peering 访问 vnet03）\n\n"
         "vnet03 192.168.0.0/24  Client & ACC Zone\n"
         "  └─ Windows 11 / ACC target\n\n"
         "Peering: vnet01 ↔ vnet02, vnet01 ↔ vnet03, vnet02 ↔ vnet03"
@@ -490,7 +496,8 @@ def create_word() -> None:
         "创建 Windows MID 和 Linux MID 两台 VM，确认能出站访问 ServiceNow instance。",
         "在 ServiceNow 安装并 Validate 两个 MID。MID 不稳定时不要继续往下做。",
         "先创建 Windows Server 2019 和 Ubuntu 22 两个最小目标，验证 Windows/Linux credentialed Discovery。",
-        "再创建 RHEL、Windows Server 2022、Windows 11、Ubuntu multi-NIC，逐步扩大范围。",
+        "再创建 RHEL、Windows Server 2022、Windows 11，逐步扩大范围。",
+        "最后用 Ubuntu 22 验证 vnet02↔vnet03 连通性：确认它只有单 NIC，但能访问 vnet03 的测试端口。",
         "部署 Palo Alto/FortiGate，先确认 SNMP 从 MID 可达，再运行网络设备 Discovery。",
         "创建 Azure Service Principal 和 Reader role，运行 Cloud Discovery。Cloud Discovery 与 IP Discovery 分开截图。",
         "安装 IIS/Nginx，创建 Service Mapping Entry Point，运行 top-down mapping。",
@@ -588,7 +595,7 @@ def create_excel() -> None:
         ["目的", "Azure 上构筑 ServiceNow Discovery / Service Mapping / ACC PoC 环境"],
         ["默认区域", "Japan East（如客户要求可替换）"],
         ["Resource Group", "RG-SNOW-Discovery-POC"],
-        ["关键限制", "Azure VM 多 NIC 不能跨 VNet；Bastion 需要 AzureBastionSubnet /26；不要使用 Azure subnet 保留 IP。"],
+        ["关键限制", "Azure VM 多 NIC 不能跨 VNet；如果 Ubuntu 要同时访问 VNet02/VNet03，必须用直接 peering，而不是跨 VNet Multi-NIC；Bastion 需要 AzureBastionSubnet /26；不要使用 Azure subnet 保留 IP。"],
         ["输出文件", str(DOCX_PATH)],
     ]
     for row in overview_rows:
