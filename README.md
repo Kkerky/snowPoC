@@ -1,1 +1,2 @@
 備考：推奨はWinRM。WinRMが利用できない場合の代替方式として、WMI（Windows Management Instrumentation）によるDiscoveryも考慮可能。ただし、WMI/DCOM通信許可およびWindows管理者権限の確認が必要。
+補足として、WMI（Windows Management Instrumentation）も利用可能だが、TCP 135に加えてDCOM/RPCの動的ポート範囲（例：49152-65535）が必要となる場合があり、Firewall設定が広くなるため、WinRMが利用できない場合の代替方式として扱う。
