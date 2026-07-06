@@ -1,0 +1,1 @@
+備考：推奨はWinRM。WinRMが利用できない場合の代替方式として、WMI（Windows Management Instrumentation）によるDiscoveryも考慮可能。ただし、WMI/DCOM通信許可およびWindows管理者権限の確認が必要。
