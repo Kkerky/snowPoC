@@ -395,3 +395,125 @@ IREまで到達したデータについては、IREの処理結果を判定材�
 確認日：2026年7月30日
 or do different companies have their own datacentre sites and Azure accounts?  
 还是说不同公司各自拥有自己的数据中心站点和 Azure 账号？
+
+-----------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------- 
+## 调查目的
+
+Leader希望确认以下内容：
+
+> 对于Discovery已经取得、但无法正常保存到CMDB表中的数据，是否可以使用IRE（Identification and Reconciliation Engine）进行识别和去重，并将其登记到现有自定义表 `u_gam_unmatched_ci` 中。
+
+本调查暂时将上述数据称为“unmatched CI”。
+
+这里的“unmatched CI”不只是指无法与现有CI匹配的数据，而是泛指Discovery已经取得相关信息，但由于某种原因未能正常登记到CMDB表中的数据。
+
+## 调查结论
+
+### 最终判定
+
+**在不修改现有 `u_gam_unmatched_ci` 表定义的前提下，无法仅通过IRE标准功能直接实现该需求。**
+
+但是，可以从Discovery或IRE的处理结果中取得未能保存到CMDB的数据，再通过独立处理完成识别、去重并写入该自定义表。因此，整体业务需求在技术上可以实现。
+
+### 判断理由
+
+现有 `u_gam_unmatched_ci` 表具有以下属性：
+
+- Scope：`Global`
+- 类型：普通自定义non-CMDB表
+- 未继承 `cmdb_ci`
+- 不是ServiceNow Base System预设表
+
+根据ServiceNow Australia Release官方说明：
+
+- Application Scope中的non-CMDB表属于IRE支持对象。
+- Global Scope中只有ServiceNow Base System预设的部分non-CMDB表受到支持。
+- 在Global Scope中任意创建的自定义表不属于官方记载的直接支持范围。
+
+因此，不能将 `u_gam_unmatched_ci` 直接指定为IRE payload的目标表，再由IRE对该表执行识别、去重和记录写入。
+
+## CMDB保存失败数据的处理
+
+Discovery取得的数据未能保存到CMDB时，并不一定都会进入相同的处理状态。
+
+### 已经进入IRE的数据
+
+对于已经进入Enhanced IRE处理的数据，根据错误内容，可能会被保存到以下标准表中：
+
+- Partial Payload：`cmdb_ire_partial_payloads`
+- Incomplete Payload：`cmdb_ire_incomplete_payloads`
+
+Partial Payload表示数据暂时不完整。当后续数据补全缺失信息时，IRE可能重新处理这些数据。
+
+Incomplete Payload用于保存包含不可恢复错误的payload，主要用于错误记录，之后不会被重新处理。
+
+IRE没有将这些数据自动转送到 `u_gam_unmatched_ci` 的标准功能。
+
+### 尚未进入IRE的数据
+
+如果Discovery在以下阶段发生错误，相关数据可能尚未发送给IRE：
+
+- Pattern执行
+- Classification
+- Credential认证
+- MID Server通信
+- Discovery其他前置处理
+
+对于没有到达IRE的数据，IRE无法执行识别和去重。
+
+因此，在设计具体处理方式之前，需要先确认数据是在Discovery处理的哪个阶段未能保存到CMDB。
+
+## 可以实现的处理结构
+
+要实现整体业务需求，需要增加以下独立处理：
+
+1. 从Discovery Status、Discovery Log、IRE处理结果、Partial Payload、Incomplete Payload等位置取得目标数据。
+2. 判断数据未能保存到CMDB的具体原因。
+3. 根据 `u_gam_unmatched_ci` 使用的识别键进行重复判断。
+4. 如果不存在相同记录，则新建记录。
+5. 如果已经存在相同记录，则更新现有记录或跳过处理。
+6. 保存原始数据、Discovery执行信息、错误原因和处理时间等审计信息。
+
+对于已经到达IRE的数据，可以根据实际情况，将IRE的处理结果作为判断依据。
+
+但是，对 `u_gam_unmatched_ci` 本身执行识别、去重和写入的部分，需要由独立的自定义处理负责，不能由IRE标准功能直接完成。
+
+## 汇报用总结
+
+> 经调查，对于Discovery已经取得、但未能正常保存到CMDB表中的数据，无法仅通过IRE标准功能完成识别、去重并直接登记到现有的 `u_gam_unmatched_ci` 表中。该表属于Global Scope下的普通自定义non-CMDB表，不在ServiceNow Australia Release官方记载的IRE直接支持范围内。另外，如果保存失败发生在数据进入IRE之前，IRE也无法处理该数据。但是，通过Discovery及IRE的处理结果取得目标数据，再由独立处理执行识别、去重并写入 `u_gam_unmatched_ci`，则可以实现整体业务需求。
+
+## 判定一览
+
+| 确认项目 | 判定 |
+|---|---|
+| 由IRE直接写入 `u_gam_unmatched_ci` | 不可，超出标准支持范围 |
+| 使用IRE识别所有CMDB保存失败数据 | 不可，IRE无法处理尚未到达IRE的数据 |
+| 使用IRE错误及处理结果作为判断依据 | 有条件可行 |
+| 通过独立处理收集保存失败数据 | 可行 |
+| 通过独立处理去重并写入该自定义表 | 可行 |
+| 仅使用IRE实现全部需求 | 不可 |
+| 结合IRE结果与自定义处理实现需求 | 可行 |
+
+## 判断依据
+
+| 判断内容 | 证据等级 | 依据 |
+|---|---|---|
+| Global Scope仅支持Base System预设的部分non-CMDB表 | 官方明确记载 | IRE support for non-CMDB tables |
+| `u_gam_unmatched_ci` 是Global Scope、无父表的普通自定义表 | 实例确认 | 当前实例的Table Definition及XML |
+| 该表不属于IRE直接支持范围 | 基于官方资料的判断 | 表定义与Australia Release官方支持范围对照 |
+| Partial Payload可能保存到 `cmdb_ire_partial_payloads` | 官方明确记载 | Identification and Reconciliation Engine |
+| Incomplete Payload可能保存到 `cmdb_ire_incomplete_payloads` | 官方明确记载 | Identification and Reconciliation Engine |
+| IRE不会自动将数据转送到该自定义表 | 基于官方功能定义的判断 | IRE只处理payload指定的受支持目标表或CI Class |
+| 通过独立处理可以实现整体业务需求 | 技术方案判断 | 对Discovery及IRE结果进行收集、判断和独立写入 |
+
+## 官方参考资料
+
+1. [IRE support for non-CMDB tables](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/ire-support-non-cmdb-tables.html)  
+   用于确认Australia Release中Global Scope和Application Scope下non-CMDB表的IRE支持范围。
+
+2. [Identification and Reconciliation Engine](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/ire.html)  
+   用于确认IRE处理机制、Partial Payload、Incomplete Payload及对应标准保存表。
+
+适用版本：ServiceNow Australia Release  
+确认日期：2026年7月30日
