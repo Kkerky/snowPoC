@@ -216,5 +216,90 @@ Leader 希望确认：
 适用版本：ServiceNow Australia Release  
 确认日期：2026年7月30日
 
+## 調査目的
+
+Leaderからの調査依頼は、以下の内容です。
+
+> Discoveryで取得したデータが既存CIと一致しない場合、IRE（Identification and Reconciliation Engine）を使用して識別・重複排除を行い、unmatched CIを既存のカスタムテーブル `u_gam_unmatched_ci` に登録できるかを確認する。
+
+## 調査結論
+
+### 最終判定
+
+**IREの標準機能だけで本要件を直接実現することはできません。ただし、「IREによる判定」と「別途用意する登録処理」を組み合わせることで、業務要件全体を実現することは可能です。**
+
+既存の `u_gam_unmatched_ci` テーブルには、以下の特徴があります。
+
+- Scope：`Global`
+- テーブル種別：通常のカスタムnon-CMDBテーブル
+- `cmdb_ci` を継承していない
+- ServiceNowのBase Systemにあらかじめ用意されたnon-CMDBテーブルではない
+
+ServiceNow Australia Releaseの公式ドキュメントには、以下の内容が記載されています。
+
+- Application Scopeでは、non-CMDBテーブルがIREのサポート対象になります。
+- Global Scopeでは、Base Systemにあらかじめ用意された一部のnon-CMDBテーブルだけがサポートされます。
+- Global Scopeに任意に作成されたカスタムテーブルは、公式ドキュメントに記載された直接サポート範囲には含まれません。
+
+したがって、**`u_gam_unmatched_ci` をIREの対象テーブルとして直接指定し、IREの標準機能だけで識別、重複排除およびレコード登録を行うことはできません。**
+
+### 実現可能な方式
+
+業務要件全体については、以下の構成で実現可能です。
+
+1. IREを使用して、Discoveryデータと正式なCMDB CIの識別および重複判定を行う。
+2. Discoveryデータが既存CIと一致するかを判定する。
+3. 業務上unmatchedと判定されたデータを、別途用意した処理によって `u_gam_unmatched_ci` に登録する。
+4. 登録処理には、Script Include、Scheduled Job、Flow、IntegrationHub ETLなどを使用する。
+
+以下の点には注意が必要です。
+
+> IREが既存CIを特定できなかった場合、通常はpayloadに指定された `className` の対象CIクラスに対して`INSERT`を実行します。IREが自動的に別の任意のカスタムテーブルへデータを転送するわけではありません。
+
+そのため、本要件の実現方式は次のように整理できます。
+
+**IRE：正式なCMDB CIに対する識別・重複判定を担当**
+
+**カスタム処理：unmatchedデータの判定結果を受け取り、`u_gam_unmatched_ci` への登録を担当**
+
+つまり、IRE単独で実現する方式ではなく、**「IRE＋ルーティング／登録処理」**による組み合わせ方式です。
+
+## 報告用の要約
+
+> 調査の結果、既存の `u_gam_unmatched_ci` は、Global Scopeに作成され、`cmdb_ci` を継承していない通常のカスタムnon-CMDBテーブルであることを確認しました。Australia Releaseの公式ドキュメントによると、Global ScopeではBase Systemにあらかじめ用意された一部のnon-CMDBテーブルのみがIREの直接サポート対象です。そのため、IREの標準機能だけで当該テーブルに対する識別、重複排除および登録を行うことはできません。ただし、IREを使用してDiscoveryデータと正式なCMDB CIの一致判定を行い、unmatchedと判定されたデータを別途用意したルーティング／登録処理で当該テーブルへ登録することにより、業務要件全体を実現することは可能です。
+
+## 判断根拠
+
+| 判断内容 | エビデンス区分 | 根拠 |
+|---|---|---|
+| Global Scopeでは、Base Systemにあらかじめ用意された一部のnon-CMDBテーブルのみがサポートされる | 公式に明記 | IRE support for non-CMDB tables |
+| `u_gam_unmatched_ci` はGlobal Scopeで、親テーブルを持たない通常のカスタムテーブルである | インスタンス確認 | 対象インスタンスのTable DefinitionおよびXML |
+| `u_gam_unmatched_ci` はIREの直接サポート範囲外である | 公式資料に基づく判断 | テーブル定義とAustralia Releaseの公式サポート範囲を比較 |
+| IREはunmatchedデータを任意の別テーブルへ自動転送しない | 公式機能仕様に基づく判断 | IREはpayloadの対象クラスに対して識別および`INSERT`／`UPDATE`を実行する |
+| IREの判定後に別処理で登録することで業務要件を実現できる | 技術方式としての判断 | IRE APIとカスタム登録処理の組み合わせ |
+
+## 公式参考資料
+
+1. [IRE support for non-CMDB tables](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/ire-support-non-cmdb-tables.html)  
+   Australia ReleaseにおけるApplication ScopeおよびGlobal Scopeのnon-CMDBテーブルに対するIREサポート範囲の確認に使用。
+
+2. [Identification and Reconciliation Engine](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/ire.html)  
+   IREの識別、重複判定およびReconciliationの基本動作の確認に使用。
+
+3. [IdentificationEngineScriptableApi](https://www.servicenow.com/docs/r/api-reference/server-api-reference/c_IdentEngineScriptAPI.html)  
+   スクリプトからIREを呼び出す方法の確認に使用。
+
+4. [Identification and Reconciliation REST API](https://www.servicenow.com/docs/r/api-reference/rest-apis/c_IdentifyReconcileAPI.html)  
+   REST APIを使用してIRE payloadを送信する方法の確認に使用。
+
+5. [Identification simulation](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/identification-simulation.html)  
+   データを登録する前にIdentification結果をシミュレーションする方法の確認に使用。
+
+6. [Create an identification rule for a non-CMDB table](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/create-non-cmdb-id-rule.html)  
+   non-CMDBテーブルに対するIdentification Ruleの適用条件と設定方法の確認に使用。
+
+対象バージョン：ServiceNow Australia Release  
+確認日：2026年7月30日
+
 or do different companies have their own datacentre sites and Azure accounts?  
 还是说不同公司各自拥有自己的数据中心站点和 Azure 账号？
