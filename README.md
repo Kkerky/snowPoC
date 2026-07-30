@@ -133,5 +133,88 @@ On slide 5 here we have the test environment layout showing the Yokohama DC and 
 Is the DC and Azure shared across many Hitachi companies,  
 这里的 DC 和 Azure 是多个 Hitachi 公司共同使用的吗？
 
+## 调查目的
+
+Leader 希望确认：
+
+> Discovery 获取的数据在无法匹配现有 CI 时，能否通过 IRE（Identification and Reconciliation Engine）完成识别、去重，并将 unmatched CI 写入现有自定义表 `u_gam_unmatched_ci`。
+
+## 调查结论
+
+### 最终判定
+
+**IRE 标准功能不能直接完成该需求，但通过“IRE 判断 + 独立写入处理”的组合方式可以实现。**
+
+现有 `u_gam_unmatched_ci` 具有以下属性：
+
+- Scope：`Global`
+- 类型：普通自定义 non-CMDB 表
+- 未继承 `cmdb_ci`
+- 不是 ServiceNow 基础系统预设的 non-CMDB 表
+
+根据 ServiceNow Australia Release 官方说明：
+
+- Application Scope 中的 non-CMDB 表可以获得 IRE 支持。
+- Global Scope 中只有 ServiceNow 基础系统预设的部分 non-CMDB 表受到支持。
+- 任意创建的 Global 自定义表不属于官方记载的直接支持范围。
+
+因此，**不能将 `u_gam_unmatched_ci` 直接指定为 IRE 的目标表，由 IRE 标准功能对该表完成识别、去重和写入。**
+
+### 可实现的方式
+
+整体业务需求仍然可以实现：
+
+1. 使用 IRE 对 Discovery 数据和正式 CMDB CI 进行识别及去重判断。
+2. 判断该数据是否能够匹配现有 CI。
+3. 对业务上判定为 unmatched 的数据，使用单独的处理逻辑写入 `u_gam_unmatched_ci`。
+4. 该处理可以通过 Script Include、Scheduled Job、Flow、IntegrationHub ETL 或其他定制处理实现。
+
+需要特别说明：
+
+> IRE 在未找到现有 CI 时，通常会根据 payload 的 `className` 在原目标 CI Class 中执行 `INSERT`。IRE 不会自动把该数据转送到另一个任意的自定义表。
+
+因此，本方案属于：
+
+**IRE 负责识别和去重判断，定制逻辑负责向 `u_gam_unmatched_ci` 写入。**
+
+并不是由 IRE 单独完成全部处理。
+
+## 汇报用一句话
+
+> 经调查，现有 `u_gam_unmatched_ci` 是 Global Scope 下未继承 `cmdb_ci` 的普通自定义表，不属于 Australia Release 官方记载的 IRE 直接支持对象，因此不能仅通过 IRE 标准功能完成该表的识别、去重和写入；但可以使用 IRE 判断 Discovery 数据是否匹配正式 CI，再由独立的路由及写入处理将 unmatched 数据登记到该表，从而实现整体业务需求。
+
+## 判断依据
+
+| 判断内容 | 证据等级 | 依据 |
+|---|---|---|
+| Global Scope 仅支持基础系统预设的部分 non-CMDB 表 | 官方明确记载 | IRE support for non-CMDB tables |
+| `u_gam_unmatched_ci` 是 Global、无父表的普通自定义表 | 实例确认 | 当前实例的 Table Definition / XML |
+| 该表不属于 IRE 直接支持范围 | 基于官方资料的判断 | 表定义与 Australia 官方支持范围对照 |
+| IRE 不会自动将 unmatched 数据转送到任意自定义表 | 基于官方功能定义的判断 | IRE 根据 payload 的目标 Class 执行识别及 INSERT/UPDATE |
+| 通过 IRE 判断后由独立处理写入可以实现需求 | 技术方案判断 | IRE API 与独立写入处理组合 |
+
+## 官方参考资料
+
+1. [IRE support for non-CMDB tables](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/ire-support-non-cmdb-tables.html)  
+   用于确认 Australia Release 对 Global/Application Scope 中 non-CMDB 表的支持范围。
+
+2. [Identification and Reconciliation Engine](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/ire.html)  
+   用于确认 IRE 的识别、去重和协调更新机制。
+
+3. [IdentificationEngineScriptableApi](https://www.servicenow.com/docs/r/api-reference/server-api-reference/c_IdentEngineScriptAPI.html)  
+   用于确认脚本方式调用 IRE 的能力。
+
+4. [Identification and Reconciliation REST API](https://www.servicenow.com/docs/r/api-reference/rest-apis/c_IdentifyReconcileAPI.html)  
+   用于确认通过 REST API 提交和判断 IRE payload 的方式。
+
+5. [Identification simulation](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/identification-simulation.html)  
+   用于确认正式写入前进行识别模拟和结果确认的方法。
+
+6. [Create an identification rule for a non-CMDB table](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/create-non-cmdb-id-rule.html)  
+   用于确认 non-CMDB Identification Rule 的适用条件和设置方式。
+
+适用版本：ServiceNow Australia Release  
+确认日期：2026年7月30日
+
 or do different companies have their own datacentre sites and Azure accounts?  
 还是说不同公司各自拥有自己的数据中心站点和 Azure 账号？
