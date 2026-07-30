@@ -297,6 +297,101 @@ ServiceNow Australia Releaseの公式ドキュメントには、以下の内容�
 
 対象バージョン：ServiceNow Australia Release  
 確認日：2026年7月30日
+-----------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------- 
+## 調査目的
 
+Leaderからの調査依頼は、以下の内容です。
+
+> Discoveryで取得したデータのうち、CMDBテーブルに正常に保存できなかったデータについて、IRE（Identification and Reconciliation Engine）を使用して識別・重複排除を行い、既存のカスタムテーブル `u_gam_unmatched_ci` に登録できるかを確認する。
+
+本調査では、上記のデータを便宜上「unmatched CI」と呼びます。
+
+ここでいう「unmatched CI」とは、単に既存CIとのIdentificationに失敗したデータではなく、Discoveryでは情報を取得できたものの、何らかの理由によりCMDBテーブルへ正常に登録できなかったデータを指します。
+
+## 調査結論
+
+### 最終判定
+
+**現在の `u_gam_unmatched_ci` のテーブル定義を変更しない前提では、IREの標準機能だけで本要件を実現することはできません。**
+
+ただし、DiscoveryまたはIREの処理結果からCMDBへ保存できなかったデータを取得し、別途用意した処理によって識別・重複排除および当該テーブルへの登録を行うことで、業務要件全体を実現することは可能です。
+
+### 判断理由
+
+対象の `u_gam_unmatched_ci` テーブルには、以下の特徴があります。
+
+- Scope：`Global`
+- 通常のカスタムnon-CMDBテーブル
+- `cmdb_ci` を継承していない
+- ServiceNowのBase Systemにあらかじめ用意されたテーブルではない
+
+ServiceNow Australia Releaseでは、Global Scopeのnon-CMDBテーブルについて、Base Systemにあらかじめ用意された一部のテーブルのみがIREのサポート対象です。
+
+そのため、`u_gam_unmatched_ci` をIRE payloadの対象テーブルとして指定し、IREに識別、重複排除およびレコード登録を直接実行させることは、公式に記載された標準サポート範囲外です。
+
+## CMDBに保存できなかったデータの扱い
+
+CMDBへ保存できなかったDiscoveryデータは、すべて同じ状態になるわけではありません。
+
+### IREまで到達したデータ
+
+Enhanced IREの処理対象になったデータは、エラー内容によって次の標準テーブルに保存される場合があります。
+
+- Partial Payload：`cmdb_ire_partial_payloads`
+- Incomplete Payload：`cmdb_ire_incomplete_payloads`
+
+Partial Payloadは、後続データによって不足情報が補完された場合、再処理される可能性があります。
+
+Incomplete Payloadは、復旧不能なエラーを含むpayloadの記録を目的として保存され、再処理されません。
+
+IREがこれらのデータを `u_gam_unmatched_ci` へ自動転送する標準機能はありません。
+
+### IREまで到達していないデータ
+
+DiscoveryのPattern、Classification、Credential、通信またはその他の処理で失敗し、IREへpayloadが送信されていない場合、そのデータをIREで識別・重複排除することはできません。
+
+したがって、対象データがDiscovery処理のどの段階で保存できなかったかを確認する必要があります。
+
+## 実現可能な構成
+
+業務要件を実現する場合は、以下のような独立した処理が必要です。
+
+1. Discovery Status、Discovery Log、IRE処理結果、Partial Payload、Incomplete Payloadなどから対象データを取得する。
+2. CMDBへ保存できなかった原因を分類する。
+3. `u_gam_unmatched_ci` 用の識別キーを使用して重複を判定する。
+4. 未登録の場合は新規登録し、登録済みの場合は更新または処理をスキップする。
+5. 元データ、Discovery実行情報、エラー理由、処理日時などを記録する。
+
+IREまで到達したデータについては、IREの処理結果を判定材料として利用できる場合があります。
+
+ただし、`u_gam_unmatched_ci` 自体に対する識別・重複排除および登録は、IREの標準機能ではなく、別途用意するカスタム処理が担当します。
+
+## 報告用の要約
+
+> 調査の結果、Discoveryで取得したもののCMDBテーブルへ正常に保存できなかったデータを、IREの標準機能だけで既存の `u_gam_unmatched_ci` に識別・重複排除して登録することはできないと判断しました。当該テーブルはGlobal Scopeに作成された通常のカスタムnon-CMDBテーブルであり、Australia ReleaseにおけるIREの直接サポート範囲外です。また、CMDBへの保存失敗がIRE処理前に発生した場合、IRE自体がそのデータを処理することもできません。一方、DiscoveryおよびIREの処理結果から対象データを取得し、別途用意した処理で識別・重複排除したうえで `u_gam_unmatched_ci` に登録する方式であれば、業務要件を実現することは可能です。
+
+## 判定一覧
+
+| 確認項目 | 判定 |
+|---|---|
+| IREから `u_gam_unmatched_ci` へ直接登録する | 不可（標準サポート範囲外） |
+| IREですべてのCMDB保存失敗データを識別する | 不可（IREへ到達していないデータは処理できない） |
+| IREのエラー／処理結果を判定材料として利用する | 条件付きで可能 |
+| 独立した処理で失敗データを収集する | 可能 |
+| 独立した処理で重複排除して当該テーブルへ登録する | 可能 |
+| IRE単独で本要件全体を実現する | 不可 |
+| IRE結果とカスタム処理を組み合わせて実現する | 可能 |
+
+## 公式参考資料
+
+1. [IRE support for non-CMDB tables](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/ire-support-non-cmdb-tables.html)  
+   Global Scopeにおけるnon-CMDBテーブルのIREサポート範囲の判断根拠。
+
+2. [Identification and Reconciliation Engine](https://www.servicenow.com/docs/r/servicenow-platform/configuration-management-database-cmdb/ire.html)  
+   IREの処理、Partial Payload、Incomplete Payloadおよび各標準保存先の確認根拠。
+
+対象バージョン：ServiceNow Australia Release  
+確認日：2026年7月30日
 or do different companies have their own datacentre sites and Azure accounts?  
 还是说不同公司各自拥有自己的数据中心站点和 Azure 账号？
