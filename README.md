@@ -218,10 +218,7 @@ Leader 希望确认：
 
 ## 調査目的
 
-Leaderからの調査依頼は、以下の内容です。
-
-> Discoveryで取得したデータが既存CIと一致しない場合、IRE（Identification and Reconciliation Engine）を使用して識別・重複排除を行い、unmatched CIを既存のカスタムテーブル `u_gam_unmatched_ci` に登録できるかを確認する。
-
+Discoveryで取得したデータのうち、CMDBテーブルに正常に保存できなかったデータ（本調査における「unmatched CI」）について、IRE（Identification and Reconciliation Engine）を使用して識別・重複排除を行い、既存のカスタムテーブル u_gam_unmatched_ci に登録できるかを確認する。
 ## 調査結論
 
 ### 最終判定
